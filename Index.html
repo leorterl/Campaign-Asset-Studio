@@ -1,0 +1,1053 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Campaign Asset Studio - AI A/B Testing Tool</title>
+    
+    <!-- FAVICON: Magic Sparkles -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>✨</text></svg>">
+
+    <!-- LIBRARIES -->
+    <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.development.js"></script>
+    <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.development.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        indigo: { 600: '#4F46E5', 700: '#4338CA' }, 
+                        slate: { 800: '#1E293B', 900: '#0F172A' } 
+                    },
+                    animation: {
+                        'pulse-fast': 'pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'fade-in': 'fadeIn 0.5s ease-out',
+                        'slide-up': 'slideUp 0.5s ease-out'
+                    },
+                    keyframes: {
+                        fadeIn: {
+                            '0%': { opacity: '0' },
+                            '100%': { opacity: '1' },
+                        },
+                        slideUp: {
+                            '0%': { transform: 'translateY(20px)', opacity: '0' },
+                            '100%': { transform: 'translateY(0)', opacity: '1' },
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- FONTS -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <!-- CUSTOM STYLES -->
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        
+        .bg-grid-pattern {
+            background-color: #f1f5f9;
+            background-image: linear-gradient(#e2e8f0 1px, transparent 1px), linear-gradient(90deg, #e2e8f0 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+
+        .loader {
+            border: 3px solid rgba(255,255,255,0.3);
+            border-top: 3px solid #fff;
+            border-radius: 50%;
+            width: 16px; height: 16px;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* Scrollbar polish */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+        
+        /* Custom selection color */
+        ::selection { background: #6366f1; color: white; }
+
+        /* Tooltip container */
+        .tooltip-container { position: relative; display: inline-flex; align-items: center; margin-left: 6px; cursor: help; }
+        .tooltip-icon { color: #9ca3af; transition: color 0.2s; }
+        .tooltip-icon:hover { color: #4F46E5; }
+        .tooltip-text {
+            visibility: hidden; width: 200px; background-color: #1e293b; color: #fff;
+            text-align: left; border-radius: 6px; padding: 8px 12px; position: absolute;
+            z-index: 100; bottom: 135%; left: 50%; transform: translateX(-50%); 
+            opacity: 0; transition: opacity 0.2s;
+            font-size: 11px; font-weight: 400; line-height: 1.4;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            pointer-events: none;
+        }
+        .tooltip-text::after {
+            content: ""; position: absolute; top: 100%; left: 50%; margin-left: -5px;
+            border-width: 5px; border-style: solid; border-color: #1e293b transparent transparent transparent;
+        }
+        .tooltip-container:hover .tooltip-text { visibility: visible; opacity: 1; }
+    </style>
+</head>
+<body class="text-slate-900 h-screen overflow-hidden flex flex-col">
+
+    <div id="error-display" style="display:none; padding:1rem; background:#fee2e2; color:#991b1b; border-bottom:2px solid #7f1d1d; font-family:monospace;"></div>
+    <div id="root" class="h-full flex flex-col"></div>
+
+    <!-- ERROR TRAP -->
+    <script>
+        window.onerror = function(msg, url, line) {
+            var display = document.getElementById('error-display');
+            display.style.display = 'block';
+            display.innerText = "⚠️ ERROR: " + msg + " (Line: " + line + ")";
+            return false;
+        };
+    </script>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // ==========================================
+        // 🔧 BRAND CONFIGURATION
+        // ==========================================
+        const DEFAULT_BRAND = {
+            name: "Acme Corp",
+            audience: "Tech-savvy professionals looking for efficiency.",
+            font: "Inter",
+            logoUrl: "", 
+            colors: [
+                { name: "Brand Blue", hex: "#2563EB" },
+                { name: "Dark Slate", hex: "#0F172A" },
+                { name: "Alert Red", hex: "#DC2626" },
+                { name: "Success Green", hex: "#16A34A" }
+            ]
+        };
+
+        const GOOGLE_FONTS = [
+            "Inter", "Roboto", "Open Sans", "Lato", "Montserrat", 
+            "Poppins", "Oswald", "Raleway", "Nunito", "Merriweather", 
+            "Playfair Display", "Rubik", "Work Sans"
+        ];
+
+        const KNOWN_MODELS = [
+            "nano-banana-pro-preview",
+            "gemini-2.0-flash-exp",
+            "gemini-1.5-pro",
+            "imagen-3.0-generate-001"
+        ];
+
+        const CHAR_LIMITS = { 'Copy': 60, 'CTA copy': 20 };
+
+        // Icons
+        const Icon = ({ name, size = 18, className = "" }) => {
+            const icons = {
+                settings: <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.52a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" />,
+                check_circle: <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14 M22 4L12 14.01l-3-3" />,
+                upload_cloud: <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242 M12 12v9 M16 16l-4-4-4 4" />,
+                wand_2: <path d="M15 4V2 M15 16v-2 M8 9h2 M20 9h2 M17.8 11.8 19 13 M10.6 6.4 12 5 M12 5l-2-2 M12 5l2 2 M12 5 8 9 M19 19l-3.35-3.35a5 5 0 0 0-7.07-7.07L5 12" />,
+                download: <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M7 10l5 5 5-5 M12 15V3" />,
+                grid: <path d="M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z"/>,
+                scan: <path d="M3 7V5a2 2 0 0 1 2-2h2 M17 3h2a2 2 0 0 1 2 2v2 M21 17v2a2 2 0 0 1-2 2h-2 M7 21H5a2 2 0 0 1-2-2v-2 M12 8v8"/>,
+                copy: <path d="M8 2H16C16.5523 2 17 2.44772 17 3V5H19C19.5523 5 20 5.44772 20 6V20C20 20.5523 19.5523 21 19 21H7C6.44772 21 6 20.5523 6 20V18H4C3.44772 18 3 17.5523 3 17V6C3 5.44772 3.44772 5 4 5H6V3C6 2.44772 6.44772 2 7 2H8ZM8 4V5H15V4H8ZM6 7V17H17V7H6ZM15 19V18H18V6H17V17H8V19H15Z" fillRule="evenodd" clipRule="evenodd"/>,
+                beaker: <path d="M4.5 3h15M6 3v2.8c0 .88.35 1.72.97 2.34l3.12 3.12c.62.62.97 1.46.97 2.34V19h-6v-5.4c0-.88.35-1.72.97-2.34l3.12-3.12A3.3 3.3 0 0 0 18 5.8V3" />,
+                alert: <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4m0 4h.01" />,
+                x: <path d="M18 6 6 18M6 6l12 12" />,
+                sparkles: <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275-1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L12 3Z" />,
+                chevron_right: <path d="M9 18l6-6-6-6" />,
+                help: <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3m0 6a.01.01 0 0 1-.01-.01M12 21a9 9 0 1 1 0-18 9 9 0 0 1 0 18z"/>,
+                check: <path d="M20 6L9 17l-5-5" />,
+                external_link: <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3" />,
+                shield: <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>,
+                edit: <><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></>,
+                refresh_cw: <><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></>,
+                trash: <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />,
+                plus: <path d="M12 5v14M5 12h14" />
+            };
+            return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>{icons[name] || icons.settings}</svg>;
+        };
+
+        const Tooltip = ({ text }) => (
+            <div className="tooltip-container">
+                <Icon name="help" size={12} className="tooltip-icon" />
+                <span className="tooltip-text">{text}</span>
+            </div>
+        );
+
+        const App = () => {
+            // --- STATE ---
+            const [apiKey, setApiKey] = useState(localStorage.getItem('gemini_api_key') || '');
+            const [showSettings, setShowSettings] = useState(false); // Initially false, controlled by welcome modal
+            const [showWelcome, setShowWelcome] = useState(!localStorage.getItem('has_seen_welcome') && !apiKey);
+            
+            const [keyStatus, setKeyStatus] = useState('idle'); // idle, checking, valid, invalid
+            const [verifyDetails, setVerifyDetails] = useState({ text: 'idle', image: 'idle' });
+            const [imageModelId, setImageModelId] = useState('nano-banana-pro-preview');
+            const [cooldown, setCooldown] = useState(0);
+            
+            const [brand, setBrand] = useState(() => {
+                const saved = localStorage.getItem('brand_config');
+                return saved ? JSON.parse(saved) : DEFAULT_BRAND;
+            });
+
+            const [campaignName, setCampaignName] = useState('');
+            const [imageFile, setImageFile] = useState(null);
+            const [imagePreview, setImagePreview] = useState(null);
+            const [testElement, setTestElement] = useState('Copy');
+            const [newValue, setNewValue] = useState('');
+            const [selectedColor, setSelectedColor] = useState(brand.colors[0]?.name || '');
+            const [variantCount, setVariantCount] = useState(1);
+            
+            const [isGenerating, setIsGenerating] = useState(false);
+            const [isGeneratingText, setIsGeneratingText] = useState(false);
+            const [batchResults, setBatchResults] = useState([]);
+            const [logs, setLogs] = useState([]);
+            const [error, setError] = useState(null);
+
+            const fileInputRef = useRef(null);
+            const brandScanRef = useRef(null);
+            const configInputRef = useRef(null);
+            const logsEndRef = useRef(null);
+
+            const isConfigured = apiKey && apiKey.length > 5;
+
+            // --- EFFECTS ---
+            useEffect(() => { 
+                localStorage.setItem('brand_config', JSON.stringify(brand)); 
+            }, [brand]);
+            
+            useEffect(() => {
+                logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
+            }, [logs]);
+
+            useEffect(() => {
+                if (cooldown > 0) {
+                    const timer = setInterval(() => setCooldown(c => c - 1), 1000);
+                    return () => clearInterval(timer);
+                }
+            }, [cooldown]);
+
+            // Dynamic Font Loading
+            useEffect(() => {
+                if (brand.font && GOOGLE_FONTS.includes(brand.font)) {
+                    const link = document.createElement('link');
+                    link.href = `https://fonts.googleapis.com/css2?family=${brand.font.replace(/ /g, '+')}:wght@400;600;700&display=swap`;
+                    link.rel = 'stylesheet';
+                    document.head.appendChild(link);
+                    return () => document.head.removeChild(link);
+                }
+            }, [brand.font]);
+
+            const log = (msg) => setLogs(prev => [...prev, `[${new Date().toLocaleTimeString().split(' ')[0]}] ${msg}`]);
+
+            // --- API UTILS ---
+            const verifyApiKey = async () => {
+                if (!apiKey.trim()) return;
+                setKeyStatus('checking');
+                setVerifyDetails({ text: 'checking', image: 'checking' });
+                
+                let textOk = false;
+                let imageOk = false;
+
+                try {
+                    // Check Text/Vision Model (Gemini 2.0 Flash)
+                    const textRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ contents: [{ parts: [{ text: "Test" }] }] })
+                    });
+                    if (textRes.ok) {
+                        setVerifyDetails(prev => ({ ...prev, text: 'valid' }));
+                        textOk = true;
+                    } else {
+                        setVerifyDetails(prev => ({ ...prev, text: 'invalid' }));
+                    }
+
+                    // Check Image Model (Nano Banana) - Using GET to check existence/access
+                    const imgRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${imageModelId}?key=${apiKey}`);
+                    if (imgRes.ok) {
+                        setVerifyDetails(prev => ({ ...prev, image: 'valid' }));
+                        imageOk = true;
+                    } else {
+                        setVerifyDetails(prev => ({ ...prev, image: 'invalid' }));
+                    }
+
+                    if (textOk && imageOk) {
+                        setKeyStatus('valid');
+                        localStorage.setItem('gemini_api_key', apiKey.trim());
+                    } else {
+                        setKeyStatus('invalid');
+                    }
+
+                } catch (e) {
+                    console.error(e);
+                    setKeyStatus('invalid');
+                    setVerifyDetails({ text: 'invalid', image: 'invalid' });
+                }
+            };
+
+            const closeWelcome = () => {
+                localStorage.setItem('has_seen_welcome', 'true');
+                setShowWelcome(false);
+                if(!apiKey) setShowSettings(true);
+            };
+
+            const saveSettings = () => {
+                if (!apiKey.trim()) return alert("API Key Required");
+                localStorage.setItem('gemini_api_key', apiKey.trim());
+                setShowSettings(false);
+            };
+
+            const downloadConfig = () => {
+                const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(brand, null, 2));
+                const downloadAnchorNode = document.createElement('a');
+                downloadAnchorNode.setAttribute("href",     dataStr);
+                downloadAnchorNode.setAttribute("download", "brand_config.json");
+                document.body.appendChild(downloadAnchorNode);
+                downloadAnchorNode.click();
+                downloadAnchorNode.remove();
+            };
+
+            const handleConfigUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    try {
+                        const newBrand = JSON.parse(event.target.result);
+                        if (!newBrand.name || !newBrand.colors) throw new Error("Invalid Config File");
+                        setBrand(newBrand);
+                        alert("Brand Configuration Loaded Successfully!");
+                    } catch (err) {
+                        alert("Failed to load config: " + err.message);
+                    }
+                };
+                reader.readAsText(file);
+            };
+
+            // --- COLOR & FONT HANDLERS ---
+            const handleColorChange = (index, field, value) => {
+                const newColors = [...brand.colors];
+                newColors[index][field] = value;
+                setBrand({ ...brand, colors: newColors });
+            };
+            
+            const addColor = () => {
+                setBrand({ ...brand, colors: [...brand.colors, { name: "New Color", hex: "#000000" }] });
+            };
+            
+            const removeColor = (index) => {
+                if (brand.colors.length <= 1) return alert("You need at least one brand color.");
+                setBrand({ ...brand, colors: brand.colors.filter((_, i) => i !== index) });
+            };
+
+            // --- RE-RENDER LOGIC ---
+            const toggleEdit = (index) => {
+                setBatchResults(prev => prev.map((item, i) => 
+                    i === index ? { ...item, isEditing: !item.isEditing } : item
+                ));
+            };
+
+            const regenerateSingleVariant = async (index, newText) => {
+                setBatchResults(prev => prev.map((item, i) => 
+                    i === index ? { ...item, isRegenerating: true } : item
+                ));
+
+                try {
+                    const item = batchResults[index];
+                    log(`Re-rendering ${item.name} with: "${newText}"...`);
+
+                    const prompt = constructPrompt(item.type, newText);
+                    const imgUrl = await generateImageCall(prompt);
+
+                    let typoWarning = false;
+                    if (!item.type.includes('color')) {
+                        const qcCheck = await callAPI(`Check if text "${newText}" is spelled correctly in image. JSON: { "typo": boolean }`, imgUrl, 0.1);
+                        if (qcCheck.includes('true')) typoWarning = true;
+                    }
+
+                    setBatchResults(prev => prev.map((res, i) => 
+                        i === index ? { 
+                            ...res, 
+                            img: imgUrl, 
+                            valUsed: newText, 
+                            isEditing: false, 
+                            isRegenerating: false,
+                            typoWarning: typoWarning,
+                            details: "Manual Edit" 
+                        } : res
+                    ));
+                    
+                } catch (e) {
+                    alert("Update failed: " + e.message);
+                    setBatchResults(prev => prev.map((item, i) => 
+                        i === index ? { ...item, isRegenerating: false } : item
+                    ));
+                }
+            };
+
+            const callAPI = async (prompt, imageData = null, temperature = 0.9) => {
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`;
+                const parts = [{ text: prompt }];
+                if (imageData) parts.push({ inlineData: { mimeType: "image/png", data: imageData.split(',')[1] }});
+                
+                const response = await fetch(url, { 
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json' }, 
+                    body: JSON.stringify({ 
+                        contents: [{ parts }], 
+                        generationConfig: { temperature: temperature },
+                        safetySettings: [{ category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" }]
+                    }) 
+                });
+                
+                if (response.status === 429) {
+                    setCooldown(60);
+                    throw new Error("Rate Limit Hit. Cooling down...");
+                }
+
+                if (!response.ok) throw new Error((await response.json()).error?.message || "API Error");
+                const data = await response.json();
+                return data.candidates[0].content.parts[0].text.trim();
+            };
+
+            // --- AUTO-WRITE LOGIC ---
+            const handleAutoWrite = async () => {
+                if(!apiKey || !imagePreview) return setError("Need API Key & Image");
+                setIsGeneratingText(true);
+                try {
+                    const prompt = `Role: Senior Copywriter. Brand: ${brand.name} (Audience: ${brand.audience}). 
+                    Task: Write ONE high-converting replacement text for ${testElement}. 
+                    Tone: ${newValue.match(/\[Tone: (.*?)\]/)?.[1] || "Professional"}. 
+                    Constraint: Max ${CHAR_LIMITS[testElement] || 50} chars.
+                    STRICT OUTPUT RULE: Return ONLY the final text string. No "Here is", no quotes, no markdown.`;
+                    
+                    let text = await callAPI(prompt, imagePreview, 0.9);
+                    text = text.replace(/^["']|["']$/g, '').replace(/^(Here is|Sure|Option).*?:/i, '').replace(/\*\*/g, '').trim();
+                    setNewValue(text);
+                } catch(e) { setError(e.message); }
+                finally { setIsGeneratingText(false); }
+            };
+
+            const addTone = (t) => setNewValue(prev => `${prev.replace(/\[Tone:.*?\]/g,'').trim()} [Tone: ${t}]`);
+
+            // --- CORE LOGIC ---
+            const handleGenerate = async (isBatch = false) => {
+                if (!apiKey || !imageFile) return setError("Missing API Key or Image");
+                setError(null); setIsGenerating(true); setBatchResults([]);
+                log(`Initializing ${isBatch ? 'Batch' : 'Single'} Run via ${imageModelId}...`);
+
+                const count = isBatch ? 4 : variantCount;
+                const tasks = [];
+                const generatedHistory = []; // MEMORY LAYER FOR THIS RUN
+
+                try {
+                    // PREP TASKS
+                    if (isBatch) {
+                        log("Hypothesizing variations...");
+                        const [headline, cta] = await Promise.all([
+                            callAPI(`Role: Copywriter. Brand: ${brand.name}. Task: Write alternative headline. Max 50 chars. STRICT OUTPUT: Raw text only.`, imagePreview, 0.9),
+                            callAPI(`Role: Copywriter. Brand: ${brand.name}. Task: Write alternative CTA. Max 15 chars. STRICT OUTPUT: Raw text only.`, imagePreview, 0.9)
+                        ]);
+                        tasks.push({ name: "Headline Var", type: 'Copy', val: headline });
+                        tasks.push({ name: "CTA Var", type: 'CTA copy', val: cta });
+                        tasks.push({ name: "Color Var 1", type: 'CTA color', val: brand.colors[1]?.name || "Secondary" });
+                        tasks.push({ name: "Color Var 2", type: 'Background color', val: brand.colors[2]?.name || "Tertiary" });
+                    } else {
+                        for (let i=0; i<count; i++) {
+                            let val = newValue || "AUTO";
+                            // If Manual Input provided, use it for Variant 1, but treat it as a SEED for variants 2, 3, etc.
+                            if (newValue && i > 0 && !testElement.includes('color')) {
+                                val = "SEED:" + newValue;
+                            }
+                            tasks.push({ name: `Variant ${i+1}`, type: testElement, val: val });
+                        }
+                    }
+
+                    // EXECUTE
+                    for (const task of tasks) {
+                        let valUsed = task.val;
+                        const idx = tasks.indexOf(task) + 1;
+                        
+                        // Auto-fill / Seed Logic
+                        if ((valUsed === "AUTO" || valUsed.startsWith("SEED:")) && !testElement.includes('color')) {
+                            log(`Brainstorming ${task.name}...`);
+                            
+                            // EXCLUSION LIST: PREVENT REPEATS
+                            const exclusion = generatedHistory.length > 0 ? `Do NOT use: ${generatedHistory.join(', ')}.` : "";
+                            
+                            let prompt = "";
+                            if (valUsed.startsWith("SEED:")) {
+                                const seedText = valUsed.replace("SEED:", "");
+                                prompt = `Role: Copywriter. Brand: ${brand.name}. 
+                                Task: Write a DISTINCT variation based on this seed text: "${seedText}". 
+                                Constraint: ${exclusion}
+                                Max ${CHAR_LIMITS[testElement]||50} chars. 
+                                STRICT OUTPUT: Raw text only.`;
+                            } else {
+                                prompt = `Role: Copywriter. Brand: ${brand.name}. 
+                                Task: Write a RADICALLY DIFFERENT alternative for ${testElement}. 
+                                Constraint: ${exclusion}
+                                Max ${CHAR_LIMITS[testElement]||50} chars. 
+                                STRICT OUTPUT: Raw text only.`;
+                            }
+
+                            // Added high temp for variety
+                            valUsed = await callAPI(prompt, imagePreview, 0.95);
+                            
+                            // Safety clean
+                            valUsed = valUsed.replace(/^["']|["']$/g, '').replace(/^(Here is|Sure|Option).*?:/i, '').replace(/\*\*/g, '').trim();
+                            generatedHistory.push(valUsed);
+                        }
+                        
+                        // Safety clean for manual inputs too
+                        if(typeof valUsed === 'string' && !testElement.includes('color')) {
+                             valUsed = valUsed.replace(/^["']|["']$/g, '').replace(/^(Here is|Sure|Option).*?:/i, '').replace(/\*\*/g, '').trim();
+                             // Add manual input to history to prevent AI from duplicating it later
+                             if (!generatedHistory.includes(valUsed)) generatedHistory.push(valUsed);
+                        }
+
+                        const hypothesis = await callAPI(`Role: Scientist. Task: 15-word hypothesis for changing ${task.type} to "${valUsed}".`, null, 0.7);
+                        
+                        log(`Rendering ${task.name}...`);
+                        const prompt = constructPrompt(task.type, valUsed);
+                        const imgUrl = await generateImageCall(prompt);
+                        
+                        let typoWarning = false;
+                        if (!task.type.includes('color')) {
+                            const qcCheck = await callAPI(`Check if text "${valUsed}" is spelled correctly in image. JSON: { "typo": boolean }`, imgUrl, 0.1);
+                            if (qcCheck.includes('true')) typoWarning = true;
+                        }
+
+                        setBatchResults(prev => [...prev, { ...task, img: imgUrl, hypothesis, valUsed, typoWarning }]);
+                        await new Promise(r => setTimeout(r, 1000)); 
+                    }
+                    log("Run Complete.");
+
+                } catch (e) { setError(e.message); log(`ERROR: ${e.message}`); }
+                finally { setIsGenerating(false); }
+            };
+
+            const constructPrompt = (type, val) => {
+                const colorHex = brand.colors.find(c => c.name === val)?.hex || val;
+                const cleanVal = type.includes('color') ? `${val} (${colorHex})` : val;
+                
+                return `You are a Graphic Designer for ${brand.name}. 
+                Brand Colors: ${brand.colors.map(c => c.name).join(", ")}. 
+                Font: ${brand.font}.
+                TASK: Change ${type} to "${cleanVal}".
+                
+                CRITICAL VISUAL RULES:
+                1. MAINTAIN ORIGINAL RESOLUTION: Do not downscale unless absolutely necessary.
+                2. PRESERVE ASPECT RATIO: Strictly keep the original image dimensions.
+                3. PRESERVE LAYOUT: Do not move elements other than the target text/color.
+                4. MATCH FONT SIZE & WEIGHT: Ensure new text fits naturally.`;
+            };
+
+            const generateImageCall = async (prompt) => {
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/${imageModelId}:generateContent?key=${apiKey}`;
+                const payload = {
+                    contents: [{ parts: [{ text: prompt }, { inlineData: { mimeType: imageFile.type, data: imagePreview.split(',')[1] } }] }],
+                    generationConfig: { responseModalities: ["IMAGE"], temperature: 0.3 }
+                };
+                const res = await fetch(url, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
+                
+                if (res.status === 429) {
+                    setCooldown(60);
+                    throw new Error("Rate Limit Hit. Cooling down...");
+                }
+
+                if(!res.ok) throw new Error("Image Gen Failed");
+                const data = await res.json();
+                return `data:image/png;base64,${data.candidates[0].content.parts[0].inlineData.data}`;
+            };
+
+            const downloadImage = (imgData, type, version) => {
+                if (!imgData) return;
+                const safeCampaign = (campaignName || 'Campaign').replace(/[^a-z0-9]/gi, '_');
+                const safeElement = type.replace(/ /g, '-');
+                // Format: CampaignName_TestElement_Version
+                const fileName = `${safeCampaign}_${safeElement}_${version}.png`;
+                const link = document.createElement('a');
+                link.href = imgData;
+                link.download = fileName;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            };
+
+            const handleColorClick = (colorName) => {
+                // If current test element is NOT a color type, default to CTA color
+                const targetElement = (testElement.includes('color')) ? testElement : 'CTA color';
+                setTestElement(targetElement);
+                setNewValue(colorName);
+            };
+
+            // --- RENDER ---
+            return (
+                <div className="flex flex-col h-full bg-slate-50 text-slate-900 font-sans relative">
+                    
+                    {/* WELCOME MODAL */}
+                    {showWelcome && (
+                        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/90 backdrop-blur-md p-4 animate-fade-in">
+                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden relative animate-slide-up">
+                                <div className="bg-indigo-600 p-8 text-center">
+                                    <div className="w-16 h-16 bg-white/20 rounded-xl flex items-center justify-center mx-auto mb-4 backdrop-blur-sm">
+                                        <Icon name="wand_2" size={32} className="text-white"/>
+                                    </div>
+                                    <h2 className="text-2xl font-bold text-white mb-2">Campaign Asset Studio</h2>
+                                    <p className="text-indigo-100 text-sm font-medium">Scientific A/B Testing for Professional Marketers</p>
+                                </div>
+                                <div className="p-8 space-y-6">
+                                    <div className="space-y-4">
+                                        <div className="flex gap-4">
+                                            <div className="bg-indigo-50 p-2 rounded-lg h-fit"><Icon name="grid" className="text-indigo-600"/></div>
+                                            <div>
+                                                <h4 className="font-bold text-slate-800 text-sm">Rapid Variation Engine</h4>
+                                                <p className="text-xs text-slate-500 mt-1">Generate scientific variations of banners in seconds using AI. Test copy, colors, and CTAs instantly.</p>
+                                            </div>
+                                        </div>
+                                        <div className="flex gap-4">
+                                            <div className="bg-green-50 p-2 rounded-lg h-fit"><Icon name="shield" className="text-green-600"/></div>
+                                            <div>
+                                                <h4 className="font-bold text-slate-800 text-sm">Privacy First (BYOK)</h4>
+                                                <p className="text-xs text-slate-500 mt-1">
+                                                    <strong>Bring Your Own Key:</strong> This is a client-side tool. Your API key and assets never leave your browser to our servers. You control your data.
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="pt-4 border-t border-slate-100">
+                                        <button onClick={closeWelcome} className="w-full bg-slate-900 text-white py-3 rounded-lg font-bold hover:bg-slate-800 transition shadow-lg flex justify-center items-center gap-2">
+                                            Get Started <Icon name="chevron_right" size={16}/>
+                                        </button>
+                                        <div className="mt-4 text-center">
+                                            <a href="https://aistudio.google.com/app/apikey" target="_blank" className="text-xs text-indigo-600 hover:underline flex items-center justify-center gap-1">
+                                                Need a Google API Key? Get one here <Icon name="external_link" size={10}/>
+                                            </a>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* 1. DARK HEADER */}
+                    <header className="bg-slate-900 text-white p-4 flex justify-between items-center shadow-lg z-20 flex-shrink-0 border-b border-slate-800">
+                        <div className="flex items-center gap-3">
+                            <div className="bg-white p-1 rounded-lg h-9 w-9 flex items-center justify-center">
+                                {brand.logoUrl ? <img src={brand.logoUrl} className="max-h-full" /> : <span className="text-slate-900 font-black text-xs">{brand.name.substring(0,2)}</span>}
+                            </div>
+                            <div>
+                                <h1 className="text-lg font-bold tracking-tight text-white leading-none">Asset Studio <span className="text-indigo-400 text-xs font-mono px-1.5 py-0.5 bg-indigo-500/10 rounded ml-2">PRO</span></h1>
+                                <p className="text-[10px] text-slate-400 uppercase tracking-widest mt-1 font-semibold">AI Variation Engine</p>
+                            </div>
+                        </div>
+                        <button onClick={() => setShowSettings(true)} className={`text-xs font-bold px-3 py-1.5 rounded-full flex items-center gap-2 transition-all ${!isConfigured ? 'bg-red-500 hover:bg-red-600 animate-pulse' : 'bg-slate-800 hover:bg-slate-700 border border-slate-700'}`}>
+                            <Icon name="settings" size={14}/> {!isConfigured ? "CONFIGURE API" : "SETTINGS"}
+                        </button>
+                    </header>
+
+                    {/* SETTINGS MODAL */}
+                    {showSettings && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4">
+                            <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden animate-[scaleIn_0.15s_ease-out]">
+                                <div className="bg-slate-50 p-4 border-b border-slate-100 flex justify-between items-center">
+                                    <h3 className="font-bold text-slate-800">Studio Configuration</h3>
+                                    <button onClick={() => setShowSettings(false)}><Icon name="x"/></button>
+                                </div>
+                                <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
+                                    {/* SYSTEM CONFIG */}
+                                    <div>
+                                        <div className="flex justify-between items-center mb-1">
+                                            <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1">
+                                                Google API Key <span className="text-red-500">*</span>
+                                            </label>
+                                            <span className="text-[10px] text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100 font-medium">BYOK: Runs locally in browser</span>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <input 
+                                                type="password" 
+                                                value={apiKey} 
+                                                onChange={e => { setApiKey(e.target.value); setKeyStatus('idle'); setVerifyDetails({text: 'idle', image: 'idle'}); }} 
+                                                className={`w-full p-2 border rounded font-mono text-sm ${keyStatus === 'valid' ? 'border-green-500 bg-green-50' : keyStatus === 'invalid' ? 'border-red-500 bg-red-50' : 'bg-white'}`} 
+                                                placeholder="Paste AIzaSy..." 
+                                            />
+                                            <button 
+                                                onClick={verifyApiKey} 
+                                                disabled={keyStatus === 'checking'}
+                                                className={`px-4 py-2 rounded text-xs font-bold transition-all ${keyStatus === 'valid' ? 'bg-green-600 text-white' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'}`}
+                                            >
+                                                {keyStatus === 'checking' ? '...' : keyStatus === 'valid' ? <Icon name="check" size={14}/> : 'Verify'}
+                                            </button>
+                                        </div>
+                                        <div className="flex justify-between items-center mt-2">
+                                            <a href="https://aistudio.google.com/app/apikey" target="_blank" className="text-[10px] text-indigo-600 hover:underline flex items-center gap-1">
+                                                Get API Key <Icon name="external_link" size={10}/>
+                                            </a>
+                                            <div className="flex gap-3">
+                                                <div className={`text-[10px] font-bold flex items-center gap-1 ${verifyDetails.text === 'valid' ? 'text-green-600' : verifyDetails.text === 'invalid' ? 'text-red-600' : 'text-slate-400'}`}>
+                                                    <span className={`w-2 h-2 rounded-full ${verifyDetails.text === 'valid' ? 'bg-green-500' : verifyDetails.text === 'invalid' ? 'bg-red-500' : verifyDetails.text === 'checking' ? 'bg-yellow-400 animate-pulse' : 'bg-slate-300'}`}></span>
+                                                    Copy/Vision Model
+                                                </div>
+                                                <div className={`text-[10px] font-bold flex items-center gap-1 ${verifyDetails.image === 'valid' ? 'text-green-600' : verifyDetails.image === 'invalid' ? 'text-red-600' : 'text-slate-400'}`}>
+                                                    <span className={`w-2 h-2 rounded-full ${verifyDetails.image === 'valid' ? 'bg-green-500' : verifyDetails.image === 'invalid' ? 'bg-red-500' : verifyDetails.image === 'checking' ? 'bg-yellow-400 animate-pulse' : 'bg-slate-300'}`}></span>
+                                                    Image Model
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <hr className="border-slate-100" />
+
+                                    {/* BRAND IDENTITY */}
+                                    <div>
+                                        <div className="flex justify-between items-center mb-1">
+                                            <div className="flex items-center gap-1">
+                                                <label className="text-xs font-bold text-slate-500 uppercase">Brand Identity</label>
+                                                <Tooltip text="Export/Import brand settings to share with your team." />
+                                            </div>
+                                            <div className="flex gap-2">
+                                                {/* EXPORT/IMPORT BUTTONS */}
+                                                <button onClick={downloadConfig} className="text-[10px] bg-slate-100 px-2 py-1 rounded hover:bg-slate-200 flex items-center gap-1" title="Download JSON">
+                                                    <Icon name="download" size={10}/> Export
+                                                </button>
+                                                <button onClick={() => configInputRef.current.click()} className="text-[10px] bg-slate-100 px-2 py-1 rounded hover:bg-slate-200 flex items-center gap-1" title="Upload JSON">
+                                                    <Icon name="upload_cloud" size={10}/> Import
+                                                </button>
+                                                <input type="file" ref={configInputRef} onChange={handleConfigUpload} className="hidden" accept=".json" />
+                                                
+                                                <div className="w-px h-6 bg-slate-200 mx-1"></div>
+
+                                                <button onClick={() => brandScanRef.current.click()} className="text-[10px] bg-indigo-50 text-indigo-600 px-2 py-1 rounded hover:bg-indigo-100 flex items-center gap-1 font-bold"><Icon name="scan" size={10}/> Scan Image</button>
+                                                <input type="file" ref={brandScanRef} onChange={async (e) => {
+                                                    const f = e.target.files[0];
+                                                    if(!f) return;
+                                                    const r = new FileReader();
+                                                    r.onload = async () => {
+                                                        try {
+                                                            const json = await callAPI(`Analyze brand from image. Return JSON: { "name": "", "colors": [{"name":"", "hex":""}], "font": "", "audience": "" }`, r.result, 0.1);
+                                                            setBrand(JSON.parse(json.replace(/```json/g,'').replace(/```/g,'')));
+                                                            alert("Brand Scanned!");
+                                                        } catch(err) { alert("Scan Failed"); }
+                                                    };
+                                                    r.readAsDataURL(f);
+                                                }} className="hidden" />
+                                            </div>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-3 p-4 border rounded-lg bg-slate-50">
+                                            <input type="text" value={brand.name} onChange={e => setBrand({...brand, name: e.target.value})} className="p-2 border rounded text-sm" placeholder="Brand Name" />
+                                            
+                                            {/* FONT DROPDOWN */}
+                                            <select 
+                                                value={brand.font} 
+                                                onChange={e => setBrand({...brand, font: e.target.value})} 
+                                                className="p-2 border rounded text-sm bg-white"
+                                            >
+                                                {GOOGLE_FONTS.map(font => (
+                                                    <option key={font} value={font}>{font}</option>
+                                                ))}
+                                            </select>
+
+                                            {/* EDITABLE COLOR LIST */}
+                                            <div className="col-span-2 space-y-2">
+                                                <div className="flex justify-between items-center">
+                                                    <label className="text-[10px] font-bold text-slate-400 uppercase">Colors</label>
+                                                    <button onClick={addColor} className="text-[10px] text-indigo-600 hover:underline flex items-center gap-1"><Icon name="plus" size={10}/> Add Color</button>
+                                                </div>
+                                                <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                                                    {brand.colors.map((c, i) => (
+                                                        <div key={i} className="flex gap-2 items-center">
+                                                            <input 
+                                                                type="color" 
+                                                                value={c.hex} 
+                                                                onChange={e => handleColorChange(i, 'hex', e.target.value)} 
+                                                                className="w-8 h-8 p-0 border border-slate-300 rounded cursor-pointer"
+                                                            />
+                                                            <input 
+                                                                type="text" 
+                                                                value={c.name} 
+                                                                onChange={e => handleColorChange(i, 'name', e.target.value)} 
+                                                                className="flex-1 p-1.5 border rounded text-xs" 
+                                                                placeholder="Color Name"
+                                                            />
+                                                            <button onClick={() => removeColor(i)} className="text-slate-400 hover:text-red-500"><Icon name="trash" size={14}/></button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label className="text-xs font-bold text-slate-500 uppercase">Audience & Tone</label>
+                                            <textarea value={brand.audience} onChange={e => setBrand({...brand, audience: e.target.value})} className="w-full mt-1 p-2 border rounded text-sm" rows="2" />
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="p-4 border-t bg-slate-50 flex justify-end">
+                                    <button onClick={saveSettings} className="bg-slate-900 text-white px-6 py-2 rounded font-bold hover:bg-slate-800">Save Config</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    <main className="flex-grow flex flex-col md:flex-row overflow-hidden relative">
+                        
+                        {/* 2. COMPACT LEFT CONTROL PANEL */}
+                        <div className="w-full md:w-80 bg-white border-r border-slate-200 flex flex-col flex-shrink-0 z-10 shadow-sm">
+                            <div className="p-5 flex-grow overflow-y-auto space-y-6">
+                                
+                                {/* Upload Section */}
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Base Asset</label>
+                                    <div onClick={() => fileInputRef.current.click()} className={`h-28 border-2 border-dashed rounded-lg flex flex-col items-center justify-center cursor-pointer transition-colors ${imagePreview ? 'border-green-500 bg-green-50/30' : 'border-slate-300 hover:border-indigo-400 hover:bg-slate-50'}`}>
+                                        <input type="file" ref={fileInputRef} onChange={e => {
+                                            const f = e.target.files[0];
+                                            if(f) { setImageFile(f); const r = new FileReader(); r.onload = (ev) => setImagePreview(ev.target.result); r.readAsDataURL(f); }
+                                        }} className="hidden" accept="image/*" />
+                                        {imagePreview ? 
+                                            <div className="text-green-600 font-bold flex flex-col items-center text-xs"><Icon name="check_circle" className="mb-1"/>Asset Loaded</div> : 
+                                            <div className="text-slate-400 flex flex-col items-center text-xs"><Icon name="upload_cloud" className="mb-2"/>Click to Upload</div>
+                                        }
+                                    </div>
+                                </div>
+
+                                {/* Controls Section */}
+                                <div className="space-y-3">
+                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Campaign</label>
+                                    <input type="text" value={campaignName} onChange={e => setCampaignName(e.target.value)} className="w-full p-2 text-sm border border-slate-300 rounded focus:ring-2 focus:ring-indigo-500" placeholder="e.g. Summer Launch" />
+                                    
+                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2 block">Test Element</label>
+                                    <div className="grid grid-cols-2 gap-1 rounded-md shadow-sm">
+                                        {['Copy', 'CTA copy', 'CTA color', 'Background color'].map((t) => (
+                                            <button 
+                                                key={t} 
+                                                onClick={() => setTestElement(t)} 
+                                                className={`py-1.5 text-[10px] font-bold border ${testElement === t ? 'bg-indigo-50 border-indigo-200 text-indigo-700 z-10' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                                            >
+                                                {t.toUpperCase()}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    
+                                    <div className="relative">
+                                        <textarea 
+                                            value={newValue} onChange={e => setNewValue(e.target.value)} 
+                                            maxLength={!testElement.includes('color') ? CHAR_LIMITS[testElement] || 100 : undefined} 
+                                            className="w-full p-3 pr-10 text-sm border border-slate-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-none" 
+                                            rows="3" placeholder={`Enter ${testElement} text...`}
+                                        />
+                                        {!testElement.includes('color') && (
+                                            <div className="absolute bottom-2 right-2 text-[10px] text-slate-400 font-mono bg-white/80 px-1 rounded border border-slate-100 shadow-sm pointer-events-none">
+                                                {newValue.length}/{CHAR_LIMITS[testElement] || 100}
+                                            </div>
+                                        )}
+                                    </div>
+                                    
+                                    {/* GENERATE AI COPY BUTTON BELOW TEXTBOX */}
+                                    <button onClick={handleAutoWrite} disabled={isGeneratingText || !imagePreview} className="w-full text-xs font-bold text-indigo-600 border border-indigo-200 bg-indigo-50 py-2 rounded hover:bg-indigo-100 flex items-center justify-center gap-2 mb-2 transition-colors">
+                                        {isGeneratingText ? <div className="loader w-3 h-3 border-indigo-300 border-t-indigo-600"/> : <Icon name="sparkles" size={14}/>}
+                                        Generate Copy with AI
+                                    </button>
+
+                                    {/* RESTORED TONE PILLS */}
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {['Professional', 'Urgent', 'Playful', 'Minimal'].map(t => (
+                                            <button key={t} onClick={() => addTone(t)} className="text-[9px] uppercase font-bold bg-white border border-slate-200 text-slate-500 px-2 py-1 rounded hover:border-indigo-300 hover:text-indigo-600 transition-colors">
+                                                {t}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    
+                                    {/* RESTORED COLOR CONTROLS */}
+                                    <div className="flex justify-between items-center mt-2">
+                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Color Palette</label>
+                                        <button onClick={() => setShowSettings(true)} className="text-indigo-500 hover:text-indigo-700" title="Edit Brand Colors"><Icon name="settings" size={12}/></button>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        {brand.colors.slice(0,4).map(c => (
+                                            <button key={c.name} onClick={() => handleColorClick(c.name)} className={`h-8 rounded border text-[10px] font-bold flex items-center gap-2 px-2 hover:bg-slate-50 transition-all ${newValue === c.name && testElement.includes('color') ? 'border-indigo-500 ring-1 ring-indigo-500' : 'border-slate-200'}`}>
+                                                <div className="w-3 h-3 rounded-full border border-slate-100" style={{backgroundColor: c.hex}}></div>
+                                                <span className="truncate">{c.name}</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Action Area */}
+                            <div className="p-4 border-t border-slate-100 bg-slate-50 space-y-3">
+                                <div className="flex gap-2">
+                                    <select value={variantCount} onChange={e => setVariantCount(e.target.value)} className="w-20 bg-white border border-slate-300 rounded text-center text-sm font-bold">
+                                        <option value="1">1x</option>
+                                        <option value="2">2x</option>
+                                        <option value="3">3x</option>
+                                    </select>
+                                    <button onClick={() => handleGenerate(false)} disabled={isGenerating || cooldown > 0} className={`flex-1 bg-indigo-600 text-white font-bold py-3 rounded shadow-md hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2 transition-all ${cooldown > 0 ? 'bg-red-500 hover:bg-red-600' : ''}`}>
+                                        {isGenerating ? <div className="loader w-4 h-4 border-2"/> : cooldown > 0 ? `❄️ Cooling Down (${cooldown}s)` : <><Icon name="wand_2"/> GENERATE</>}
+                                    </button>
+                                </div>
+                                {error && <div className="text-red-500 text-xs font-bold text-center">{error}</div>}
+                            </div>
+                        </div>
+
+                        {/* 3. WORKSPACE (RIGHT) */}
+                        <div className="flex-1 bg-grid-pattern relative flex flex-col h-full overflow-hidden">
+                            
+                            {/* RESULTS GRID */}
+                            <div className="flex-1 overflow-y-auto p-8">
+                                {batchResults.length === 0 ? (
+                                    <div className="h-full flex flex-col items-center justify-center">
+                                        {/* RESTORED: LARGE PREVIEW IF IMAGE LOADED */}
+                                        {imagePreview ? (
+                                            <div className="relative max-w-2xl w-full bg-white p-4 rounded-xl shadow-lg border border-slate-200 animate-[modal-enter_0.3s_ease-out]">
+                                                <div className="absolute -top-3 left-4 bg-slate-800 text-white text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wider shadow-sm">Base Asset Ready</div>
+                                                <img src={imagePreview} className="w-full h-auto rounded object-contain max-h-[60vh]" />
+                                                <div className="mt-4 text-center text-slate-500 text-sm">
+                                                    Configure your test on the left and click <strong className="text-indigo-600">Generate</strong>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="text-slate-400 opacity-60 text-center">
+                                                <div className="w-24 h-24 border-2 border-dashed border-slate-300 rounded-xl flex items-center justify-center mb-4 mx-auto"><Icon name="upload_cloud" size={32}/></div>
+                                                <p className="font-bold">No Asset Loaded</p>
+                                                <p className="text-xs">Upload a banner to begin testing.</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6 pb-20">
+                                        {/* Original Asset Card */}
+                                        <div className="bg-white p-3 rounded-lg shadow-sm border border-slate-200 opacity-75 grayscale-[50%] h-fit">
+                                            {/* REMOVED: aspect-[4/3] - now uses auto height */}
+                                            <div className="bg-slate-100 rounded flex items-center justify-center mb-3 overflow-hidden">
+                                                <img src={imagePreview} className="w-full h-auto object-contain mix-blend-multiply" />
+                                            </div>
+                                            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">Baseline Asset</div>
+                                        </div>
+
+                                        {/* Generated Cards */}
+                                        {batchResults.map((res, i) => (
+                                            <div key={i} className="bg-white p-3 rounded-lg shadow-md border border-indigo-100 group hover:shadow-xl transition-all relative animate-[modal-enter_0.3s_ease-out] h-fit">
+                                                {/* Typo Badge */}
+                                                {res.typoWarning && !res.isRegenerating && <div className="absolute top-4 right-4 bg-red-500 text-white text-[10px] font-bold px-2 py-1 rounded shadow-sm z-10 flex items-center gap-1"><Icon name="alert" size={10}/> TYPO DETECTED</div>}
+                                                
+                                                <div className="bg-slate-50 rounded flex items-center justify-center mb-3 overflow-hidden relative min-h-[160px]">
+                                                    {res.isRegenerating ? (
+                                                        <div className="flex flex-col items-center justify-center p-4">
+                                                            <div className="loader w-8 h-8 border-indigo-200 border-t-indigo-600 mb-2"></div>
+                                                            <span className="text-xs text-indigo-600 font-bold animate-pulse">Re-rendering...</span>
+                                                        </div>
+                                                    ) : (
+                                                        <>
+                                                            <img src={res.img} className="w-full h-auto object-contain" />
+                                                            <div className="absolute inset-0 bg-slate-900/0 group-hover:bg-slate-900/10 transition-colors flex items-end justify-end p-2 opacity-0 group-hover:opacity-100">
+                                                                <button onClick={() => downloadImage(res.img, res.type, res.name)} className="bg-white text-slate-900 p-2 rounded-full shadow-lg hover:scale-110 transition-transform"><Icon name="download" size={16}/></button>
+                                                            </div>
+                                                        </>
+                                                    )}
+                                                </div>
+
+                                                <div className="space-y-2">
+                                                    <div className="flex justify-between items-start">
+                                                        <h4 className="font-bold text-sm text-slate-800">{res.name}</h4>
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-mono">{res.type}</span>
+                                                            {!res.isEditing && !res.isRegenerating && (
+                                                                <button onClick={() => toggleEdit(i)} className="text-slate-400 hover:text-indigo-600 transition-colors" title="Edit Text">
+                                                                    <Icon name="edit" size={14}/>
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    </div>
+
+                                                    {res.isEditing ? (
+                                                        <div className="mt-2 bg-indigo-50 p-2 rounded border border-indigo-100 animate-fade-in">
+                                                            <label className="text-[10px] font-bold text-indigo-900 uppercase">Edit & Re-Render</label>
+                                                            {res.type.includes('color') ? (
+                                                                <div className="flex gap-2 mb-2 mt-1">
+                                                                    <input
+                                                                        type="color"
+                                                                        id={`edit-color-${i}`}
+                                                                        defaultValue={brand.colors.find(c => c.name === res.valUsed)?.hex || "#000000"}
+                                                                        className="h-9 w-9 p-0 border border-indigo-200 rounded cursor-pointer"
+                                                                        onChange={(e) => document.getElementById(`edit-input-${i}`).value = e.target.value}
+                                                                    />
+                                                                    <input
+                                                                        type="text"
+                                                                        id={`edit-input-${i}`}
+                                                                        defaultValue={res.valUsed}
+                                                                        className="flex-1 text-xs p-2 border border-indigo-200 rounded focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                                                    />
+                                                                </div>
+                                                            ) : (
+                                                                <input 
+                                                                    type="text" 
+                                                                    id={`edit-input-${i}`}
+                                                                    defaultValue={res.valUsed} 
+                                                                    className="w-full text-xs p-2 border border-indigo-200 rounded mt-1 mb-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                                                />
+                                                            )}
+                                                            <div className="flex gap-2 justify-end">
+                                                                <button onClick={() => toggleEdit(i)} className="text-xs text-slate-500 hover:text-slate-700 font-medium px-2">Cancel</button>
+                                                                <button 
+                                                                    onClick={() => regenerateSingleVariant(i, document.getElementById(`edit-input-${i}`).value)} 
+                                                                    className="text-xs bg-indigo-600 text-white px-3 py-1.5 rounded font-bold hover:bg-indigo-700 flex items-center gap-1"
+                                                                >
+                                                                    <Icon name="refresh_cw" size={12}/> Update
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="text-xs text-slate-600 border-l-2 border-indigo-500 pl-2 py-0.5 italic line-clamp-2">
+                                                            "{res.valUsed}"
+                                                        </div>
+                                                    )}
+
+                                                    {/* Hypothesis Pill */}
+                                                    {!res.isEditing && (
+                                                        <div className="bg-slate-50 rounded p-2 text-[10px] text-slate-500 leading-tight flex gap-2">
+                                                            <Icon name="beaker" size={12} className="text-indigo-400 flex-shrink-0"/>
+                                                            {res.hypothesis}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* 4. TERMINAL LOGS (BOTTOM) */}
+                            <div className="h-32 bg-slate-900 border-t border-slate-800 p-3 font-mono text-[10px] overflow-y-auto flex-shrink-0 z-20">
+                                <div className="text-slate-500 font-bold mb-1 uppercase tracking-wider flex justify-between">
+                                    <span>System Output</span>
+                                    <span>{imageModelId}</span>
+                                </div>
+                                <div className="space-y-1">
+                                    {logs.length === 0 && <span className="text-slate-600 animate-pulse">Waiting for input...</span>}
+                                    {logs.map((l, i) => (
+                                        <div key={i} className="text-green-400 border-l-2 border-slate-700 pl-2">
+                                            <span className="opacity-50 mr-2">{l.split(']')[0]}]</span>
+                                            {l.split(']')[1]}
+                                        </div>
+                                    ))}
+                                    <div ref={logsEndRef} />
+                                </div>
+                            </div>
+
+                        </div>
+                    </main>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
